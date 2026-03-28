@@ -47,18 +47,18 @@
 
 | REQ ID | Phase | Status |
 |--------|-------|--------|
-| PIPE-01 | — | Pending |
-| PIPE-02 | — | Pending |
-| PIPE-03 | — | Pending |
-| PIPE-04 | — | Pending |
-| ARCH-01 | — | Pending |
-| ARCH-02 | — | Pending |
-| ARCH-03 | — | Pending |
-| ARCH-04 | — | Pending |
-| ART-01 | — | Pending |
-| ART-02 | — | Pending |
-| ART-03 | — | Pending |
-| ART-04 | — | Pending |
-| TEST-01 | — | Pending |
-| TEST-02 | — | Pending |
-| BATCH-01 | — | Pending |
+| PIPE-01 | Phase 1 | Pending |
+| PIPE-02 | Phase 1 | Pending |
+| PIPE-03 | Phase 1 | Pending |
+| PIPE-04 | Phase 1 | Pending |
+| ARCH-01 | Phase 2 | Pending |
+| ARCH-02 | Phase 2 | Pending |
+| ARCH-03 | Phase 2 | Pending |
+| ARCH-04 | Phase 2 | Pending |
+| TEST-01 | Phase 2 | Pending |
+| ART-01 | Phase 3 | Pending |
+| ART-02 | Phase 3 | Pending |
+| ART-03 | Phase 3 | Pending |
+| ART-04 | Phase 3 | Pending |
+| TEST-02 | Phase 3 | Pending |
+| BATCH-01 | Phase 4 | Pending |
