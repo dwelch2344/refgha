@@ -112,6 +112,13 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/output"
           chmod 777 "$GITHUB_WORKSPACE/output"
 
+      - name: Initialize ArchiveBox collection
+        run: |
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE/output:/data" \
+            archivebox/archivebox \
+            init --setup
+
       - name: Archive URL with ArchiveBox
         run: |
           docker run --rm \
