@@ -42,7 +42,7 @@ jobs:
           fi
 
           MATRIX=$(printf '%s' "$VALID_CVES" \
-            | jq -R -s 'split("\n") | map(select(length > 0)) | tojson')
+            | jq -R -s 'split("\n") | map(select(length > 0))' | jq -c '.')
 
           echo "matrix=${MATRIX}" >> "$GITHUB_OUTPUT"
           echo "cve_count=${CVE_COUNT}" >> "$GITHUB_OUTPUT"
