@@ -94,7 +94,13 @@ jobs:
 
   archive:
     runs-on: ubuntu-latest
+    needs: prepare
+    if: needs.prepare.outputs.has_refs == 'true'
     continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        ref: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     steps:
       - name: Prepare output directory
         run: |
@@ -118,7 +124,7 @@ jobs:
             -e SAVE_YTDLP=False \
             -e SAVE_ARCHIVE_DOT_ORG=False \
             archivebox/archivebox \
-            add --depth=0 "https://nvd.nist.gov/vuln/detail/CVE-2021-44228"
+            add --depth=0 "${{ matrix.ref.url }}"
 
       - name: Locate snapshot and compress WARC
         run: |
@@ -152,7 +158,7 @@ jobs:
       - name: Upload archive artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ref-test
+          name: ref-${{ matrix.ref.index }}
           path: |
             ${{ env.SNAPSHOT_DIR }}/pdf.pdf
             ${{ env.SNAPSHOT_DIR }}/screenshot.png
