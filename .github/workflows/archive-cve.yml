@@ -164,3 +164,42 @@ jobs:
             ${{ env.SNAPSHOT_DIR }}/screenshot.png
             ${{ env.SNAPSHOT_DIR }}/warc.tgz
           if-no-files-found: error
+
+  collect:
+    runs-on: ubuntu-latest
+    needs: archive
+    if: always()
+    steps:
+      - name: Download all reference artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ref-*
+          merge-multiple: true
+          path: collected/
+
+      - name: Bundle into per-CVE artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cve-${{ inputs.cve_id }}-archives
+          path: collected/
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Write job summary
+        if: always()
+        run: |
+          set -euo pipefail
+
+          # Count collected files to infer archive outcomes.
+          # Each successful archive job produces exactly 3 files: pdf.pdf, screenshot.png, warc.tgz
+          TOTAL_FILES=$(find collected/ -type f 2>/dev/null | wc -l | tr -d ' ')
+          SUCCESSFUL_ARCHIVES=$(( TOTAL_FILES / 3 ))
+
+          {
+            echo "### ${{ inputs.cve_id }}: Archive Run Complete"
+            echo ""
+            echo "| Metric | Count |"
+            echo "|--------|-------|"
+            echo "| Archives succeeded | ${SUCCESSFUL_ARCHIVES} |"
+            echo "| Files collected | ${TOTAL_FILES} |"
+          } >> "$GITHUB_STEP_SUMMARY"
