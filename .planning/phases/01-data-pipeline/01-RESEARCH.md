@@ -1,7 +1,7 @@
 # Phase 1: Data Pipeline - Research
 
 **Researched:** 2026-03-28
-**Domain:** GitHub Actions workflow — workflow_dispatch, MITRE CVE API, jq/bash data pipeline, fromJSON matrix output
+**Domain:** GitHub Actions workflow — workflow_dispatch, CVEProject/cvelistV5 GitHub raw content, jq/bash data pipeline, fromJSON matrix output
 **Confidence:** HIGH
 
 ---
@@ -12,7 +12,7 @@
 | ID | Description | Research Support |
 |----|-------------|------------------|
 | PIPE-01 | User can trigger workflow with a single CVE ID via workflow_dispatch | workflow_dispatch input syntax verified; string type with required:true and description is the correct pattern |
-| PIPE-02 | Action fetches CVE data from MITRE public API (`https://cveawg.mitre.org/api/cve/{CVE-ID}`) | API endpoint verified live; returns CVE JSON 5.x; no auth required; curl --fail-with-body is the right error-catching flag |
+| PIPE-02 | Action fetches CVE JSON from CVEProject/cvelistV5 GitHub raw content (`https://raw.githubusercontent.com/CVEProject/cvelistV5/refs/heads/main/cves/{year}/{numXXX}/CVE-{id}.json`) | GitHub raw content endpoint verified; returns CVE JSON v5.1; no auth required; curl --fail-with-body for error handling; URL requires computing year and numXXX block from CVE ID |
 | PIPE-03 | Action extracts all reference URLs from the API JSON response | Verified field path `.containers.cna.references[].url` against live CVE-2021-44228 (60+ refs) and CVE-1999-0001 (2 refs); jq null-safe extraction pattern documented |
 | PIPE-04 | Action handles CVEs with zero references gracefully (no-op, clear summary) | Empty matrix is a GHA workflow-level error; must check ref count before matrix construction and emit $GITHUB_STEP_SUMMARY instead |
 </phase_requirements>
@@ -21,9 +21,9 @@
 
 ## Summary
 
-Phase 1 builds the prepare job: a self-contained GitHub Actions job that accepts a CVE ID via `workflow_dispatch`, fetches the MITRE public API, extracts reference URLs, handles edge cases (invalid IDs, API errors, zero references), and emits a `fromJSON`-compatible matrix output for downstream jobs.
+Phase 1 builds the prepare job: a self-contained GitHub Actions job that accepts a CVE ID via `workflow_dispatch`, fetches the CVE JSON from CVEProject/cvelistV5 GitHub raw content, extracts reference URLs, handles edge cases (invalid IDs, fetch errors, zero references), and emits a `fromJSON`-compatible matrix output for downstream jobs.
 
-All four requirements (PIPE-01 through PIPE-04) are implementable with native GHA runner tools: Bash, `curl`, and `jq`. No additional installs are needed. The MITRE API is public, returns a stable CVE JSON v5 schema, and requires no authentication. The field path `.containers.cna.references[].url` was verified against live API responses for multiple CVEs.
+All four requirements (PIPE-01 through PIPE-04) are implementable with native GHA runner tools: Bash, `curl`, and `jq`. No additional installs are needed. The GitHub raw content endpoint is public and requires no authentication. URL pattern: `https://raw.githubusercontent.com/CVEProject/cvelistV5/refs/heads/main/cves/{year}/{numXXX}/CVE-{id}.json` where `{numXXX}` groups CVE numbers into 1000-blocks (e.g., 29002 → 29xxx). The field path `.containers.cna.references[].url` is consistent across CVE v5.1 records.
 
 The single highest-risk item in this phase is the empty-matrix edge case (PIPE-04). GitHub Actions treats an empty `fromJSON` matrix as a workflow-level error — this cannot be handled downstream. The prepare job must check the reference count before setting the matrix output and exit cleanly with a job summary if zero references are found. Everything else in this phase is a well-documented GHA pattern with HIGH confidence.
 
@@ -39,7 +39,7 @@ The single highest-risk item in this phase is the empty-matrix edge case (PIPE-0
 |-------------|---------|---------|--------------|
 | GitHub Actions | N/A | Workflow runtime | Project requirement; no infrastructure needed |
 | `ubuntu-latest` runner | Current (24.04) | Job execution environment | Pre-installs curl, jq, bash; no setup overhead |
-| `curl` | pre-installed | MITRE API fetch | Native to runner; `--fail-with-body` gives clean error handling |
+| `curl` | pre-installed | GitHub raw content fetch | Native to runner; `--fail-with-body` gives clean error handling |
 | `jq` | pre-installed (1.6+) | JSON extraction and matrix construction | Native to runner; null-safe paths handle reserved CVEs cleanly |
 | `workflow_dispatch` | N/A | Manual trigger with CVE ID input | The only trigger type that accepts user input without a PR/push event |
 
@@ -92,25 +92,28 @@ on:
 
 **Note:** Use `inputs.cve_id` (not `github.event.inputs.cve_id`) in expressions — the `inputs` context preserves types correctly. For string inputs this doesn't matter, but the pattern is correct.
 
-### Pattern 2: MITRE API Fetch with Error Handling
+### Pattern 2: GitHub Raw Content Fetch with URL Construction
 
-**What:** Fetches the CVE record from the MITRE public API. `--fail-with-body` makes curl exit non-zero on HTTP 4xx/5xx and includes the body in stderr for debugging.
-**When to use:** PIPE-02 pattern — the API client.
+**What:** Constructs the raw.githubusercontent.com URL from the CVE ID and fetches the JSON. Requires parsing the year and computing the numXXX 1000-block from the CVE number.
+**When to use:** PIPE-02 pattern — the data fetch.
 
-```yaml
-# Source: verified against https://cveawg.mitre.org/api/cve/CVE-2021-44228
-- name: Fetch CVE data
-  id: fetch
-  run: |
-    CVE_ID="${{ inputs.cve_id }}"
-    RESPONSE=$(curl --fail-with-body --silent --show-error \
-      "https://cveawg.mitre.org/api/cve/${CVE_ID}")
-    echo "response<<EOF" >> "$GITHUB_OUTPUT"
-    echo "$RESPONSE" >> "$GITHUB_OUTPUT"
-    echo "EOF" >> "$GITHUB_OUTPUT"
+```bash
+# Source: verified against https://raw.githubusercontent.com/CVEProject/cvelistV5/refs/heads/main/cves/2025/29xxx/CVE-2025-29002.json
+CVE_ID="${{ inputs.cve_id }}"
+
+# Parse CVE ID components: CVE-{YEAR}-{NUM}
+YEAR=$(echo "$CVE_ID" | cut -d'-' -f2)
+NUM=$(echo "$CVE_ID" | cut -d'-' -f3)
+NUM_INT=$((10#$NUM))  # strip leading zeros
+BLOCK=$(( NUM_INT / 1000 ))
+NUM_XXX="${BLOCK}xxx"
+
+CVE_URL="https://raw.githubusercontent.com/CVEProject/cvelistV5/refs/heads/main/cves/${YEAR}/${NUM_XXX}/${CVE_ID}.json"
+
+RESPONSE=$(curl --fail-with-body --silent --show-error "$CVE_URL")
 ```
 
-**Caution:** Storing full API response in `$GITHUB_OUTPUT` works for typical CVEs, but the 1 MB per-job output limit could theoretically be hit for CVEs with very large records. For Phase 1, parse the response in the same step rather than storing the full body.
+**Note:** The `10#$NUM` forces base-10 interpretation to handle leading zeros (e.g., CVE-2024-0001). The 1000-block computation maps 29002 → 29xxx, 0001 → 0xxx, etc.
 
 ### Pattern 3: URL Extraction with Null-Safe jq
 
@@ -226,11 +229,11 @@ jobs:
 **How to avoid:** Check reference count in the prepare step before setting matrix output. Set `has_refs=false` and skip matrix jobs with `if: needs.prepare.outputs.has_refs == 'true'`. Write a summary to `$GITHUB_STEP_SUMMARY` explaining zero refs were found.
 **Warning signs:** Workflow fails on valid CVE IDs that happen to have no references (reserved CVEs, CVEs with no external advisories).
 
-### Pitfall 2: MITRE API Returns 404 for Non-Existent CVE IDs
+### Pitfall 2: GitHub Raw Content Returns 404 for Non-Existent CVEs
 
-**What goes wrong:** An invalid or non-existent CVE ID returns HTTP 404. Without `--fail-with-body`, `curl` exits 0, `jq` receives an HTML error page, and the extraction silently produces garbage or empty output.
-**Why it happens:** `curl` by default exits 0 for all HTTP responses including error codes.
-**How to avoid:** Always use `curl --fail-with-body --silent --show-error`. The step will fail with a non-zero exit code and the response body will appear in the runner log.
+**What goes wrong:** An invalid CVE ID or wrong numXXX block computation results in HTTP 404. Without `--fail-with-body`, `curl` exits 0, `jq` receives an HTML 404 page, and the extraction silently produces garbage or empty output.
+**Why it happens:** `curl` by default exits 0 for all HTTP responses including error codes. Also, incorrect numXXX block math (e.g., not stripping leading zeros) produces wrong URL paths.
+**How to avoid:** Always use `curl --fail-with-body --silent --show-error`. Use `10#$NUM` to force base-10 interpretation of CVE numbers with leading zeros.
 **Warning signs:** Workflow appears to succeed but emits zero URLs for a valid CVE.
 
 ### Pitfall 3: Reserved/Rejected CVEs Lack `containers.cna.references`
@@ -268,8 +271,8 @@ jobs:
 ### Complete Prepare Step (consolidated)
 
 ```bash
-# Source: Verified against MITRE API live responses (2026-03-28)
-# Field path .containers.cna.references[].url confirmed for CVE-2021-44228, CVE-1999-0001, CVE-2024-0001, CVE-2024-12345
+# Source: Verified against CVEProject/cvelistV5 GitHub raw content (2026-03-28)
+# Field path .containers.cna.references[].url confirmed for CVE-2025-29002 and others
 
 set -euo pipefail
 
@@ -282,9 +285,16 @@ if [[ ! "$CVE_ID" =~ ^CVE-[0-9]{4}-[0-9]{4,}$ ]]; then
   exit 1
 fi
 
-# Fetch from MITRE API
-RESPONSE=$(curl --fail-with-body --silent --show-error \
-  "https://cveawg.mitre.org/api/cve/${CVE_ID}")
+# Construct GitHub raw content URL
+YEAR=$(echo "$CVE_ID" | cut -d'-' -f2)
+NUM=$(echo "$CVE_ID" | cut -d'-' -f3)
+NUM_INT=$((10#$NUM))
+BLOCK=$(( NUM_INT / 1000 ))
+NUM_XXX="${BLOCK}xxx"
+CVE_URL="https://raw.githubusercontent.com/CVEProject/cvelistV5/refs/heads/main/cves/${YEAR}/${NUM_XXX}/${CVE_ID}.json"
+
+# Fetch CVE JSON
+RESPONSE=$(curl --fail-with-body --silent --show-error "$CVE_URL")
 
 # Extract reference URLs (null-safe — handles reserved/rejected CVEs)
 URLS=$(echo "$RESPONSE" | jq -r '
@@ -356,13 +366,16 @@ jobs:
 
 ---
 
-## MITRE API Reference
+## CVEProject/cvelistV5 Reference
 
-**Endpoint:** `https://cveawg.mitre.org/api/cve/{CVE-ID}`
+**Source:** `https://raw.githubusercontent.com/CVEProject/cvelistV5/refs/heads/main/cves/{year}/{numXXX}/CVE-{id}.json`
 **Auth:** None required
-**Schema:** CVE JSON 5.x
+**Schema:** CVE JSON v5.1
 
-**Verified response structure** (live calls against CVE-2021-44228, CVE-1999-0001, CVE-2024-0001, CVE-2024-12345 on 2026-03-28):
+**URL construction:** CVE-{YEAR}-{NUM} → year={YEAR}, numXXX=floor(NUM/1000)xxx
+**Example:** CVE-2025-29002 → `.../cves/2025/29xxx/CVE-2025-29002.json`
+
+**Verified response structure** (verified against CVE-2025-29002 and others):
 
 ```
 Root keys:
@@ -405,15 +418,15 @@ Root keys:
 
 ## Open Questions
 
-1. **MITRE API behavior for RESERVED CVEs**
+1. **RESERVED CVEs in cvelistV5 repo**
    - What we know: The `.containers.cna` object or `.references` array may be absent for RESERVED CVEs; null-safe jq handles this
-   - What's unclear: Whether RESERVED CVEs return HTTP 200 with a reduced JSON body, or whether the API returns a different status code
-   - Recommendation: The null-safe jq pattern plus `--fail-with-body` handles both cases safely. If needed, check `cveMetadata.state` in the response and emit a specific summary message for reserved CVEs.
+   - What's unclear: Whether RESERVED CVEs have JSON files in the repo at all, or only PUBLISHED/REJECTED
+   - Recommendation: The null-safe jq pattern plus `--fail-with-body` handles both cases safely (missing file = 404, missing references = empty extraction).
 
 2. **CVE ID format validation strictness**
    - What we know: Standard format is `CVE-YYYY-NNNNN` where NNNNN is 4+ digits
-   - What's unclear: Whether MITRE accepts lowercase or alternate formats and returns data vs. 404
-   - Recommendation: Enforce uppercase `^CVE-[0-9]{4}-[0-9]{4,}$` in the validation step. Fail fast with a clear error rather than letting the API return a 404 with a confusing message.
+   - What's unclear: Edge cases in numXXX block computation for very old CVEs (e.g., CVE-1999-0001 → 0xxx)
+   - Recommendation: Enforce uppercase `^CVE-[0-9]{4}-[0-9]{4,}$`. Use `10#$NUM` to strip leading zeros for correct arithmetic.
 
 ---
 
@@ -423,10 +436,10 @@ All tools required for Phase 1 are pre-installed on `ubuntu-latest` GHA runners.
 
 | Dependency | Required By | Available | Version | Fallback |
 |------------|------------|-----------|---------|----------|
-| `curl` | MITRE API fetch (PIPE-02) | Yes (pre-installed) | 7.x+ | None needed |
+| `curl` | GitHub raw content fetch (PIPE-02) | Yes (pre-installed) | 7.x+ | None needed |
 | `jq` | JSON extraction (PIPE-03) | Yes (pre-installed) | 1.6+ | None needed |
 | `bash` | Scripting | Yes (pre-installed) | 5.x | None needed |
-| MITRE CVE API | PIPE-02, PIPE-03 | Yes (public endpoint) | v5 schema | None — required |
+| GitHub raw content (CVEProject/cvelistV5) | PIPE-02, PIPE-03 | Yes (public) | v5.1 schema | None — required |
 
 **Missing dependencies with no fallback:** None.
 

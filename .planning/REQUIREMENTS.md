@@ -4,7 +4,7 @@
 
 ### Data Pipeline
 - [ ] **PIPE-01**: User can trigger workflow with a single CVE ID via workflow_dispatch
-- [ ] **PIPE-02**: Action fetches CVE data from MITRE public API (`https://cveawg.mitre.org/api/cve/{CVE-ID}`)
+- [ ] **PIPE-02**: Action fetches CVE JSON from CVEProject/cvelistV5 GitHub raw content (`https://raw.githubusercontent.com/CVEProject/cvelistV5/refs/heads/main/cves/{year}/{numXXX}/CVE-{id}.json`)
 - [ ] **PIPE-03**: Action extracts all reference URLs from the API JSON response
 - [ ] **PIPE-04**: Action handles CVEs with zero references gracefully (no-op, clear summary)
 
@@ -39,7 +39,7 @@
 ## Out of Scope
 
 - Storage/indexing of archived content — future third step
-- MITRE API authentication — public endpoint sufficient
+- MITRE API (using GitHub raw content instead)
 - Custom ArchiveBox configuration beyond PDF/screenshot/WARC — defaults fine
 - Persistent ArchiveBox instance — one-shot containers only
 

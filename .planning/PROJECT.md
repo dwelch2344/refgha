@@ -2,7 +2,7 @@
 
 ## What This Is
 
-A GitHub Action that takes a CVE identifier, fetches its references from the MITRE CVE API, and archives each reference URL using ArchiveBox — producing PDF, screenshot, and WARC outputs. Designed for local development with ACT and deployment as a standard GitHub Action.
+A GitHub Action that takes a CVE identifier, fetches its references from the CVEProject/cvelistV5 GitHub repo (raw JSON), and archives each reference URL using ArchiveBox — producing PDF, screenshot, and WARC outputs. Designed for local development with ACT and deployment as a standard GitHub Action.
 
 ## Core Value
 
@@ -18,7 +18,7 @@ Every reference URL for a given CVE is reliably archived into durable formats (P
 
 - [ ] Project configured with ACT for local GitHub Actions testing
 - [ ] GitHub Action accepts a CVE ID as input (e.g., CVE-2025-24070)
-- [ ] Action fetches CVE data from MITRE public API (https://cveawg.mitre.org/api/cve/{CVE-ID})
+- [ ] Action fetches CVE data from CVEProject/cvelistV5 GitHub raw content (https://raw.githubusercontent.com/CVEProject/cvelistV5/refs/heads/main/cves/{year}/{numXXX}/CVE-{id}.json)
 - [ ] Action extracts all reference URLs from the API response
 - [ ] Action fans out into a matrix of jobs — one per reference URL
 - [ ] Each matrix job runs ArchiveBox in a Docker container as a one-off
@@ -33,14 +33,17 @@ Every reference URL for a given CVE is reliably archived into durable formats (P
 ### Out of Scope
 
 - Storage/indexing of archived content — deferred to a future third step
-- Authentication with MITRE API — public endpoint is sufficient
+- MITRE API (using GitHub raw content instead — simpler, no rate limits)
 - Processing CVEs without references — no-op is acceptable
 - Custom ArchiveBox configuration beyond PDF/screenshot/WARC — defaults are fine
 
 ## Context
 
-- MITRE CVE API is public, no auth needed: `https://cveawg.mitre.org/api/cve/{CVE-ID}`
-- API returns JSON with a `references` array containing URLs
+- Data source: CVEProject/cvelistV5 GitHub repo raw JSON files
+- URL pattern: `https://raw.githubusercontent.com/CVEProject/cvelistV5/refs/heads/main/cves/{year}/{numXXX}/CVE-{id}.json`
+  - Example: CVE-2025-29002 → `.../cves/2025/29xxx/CVE-2025-29002.json`
+  - The `{numXXX}` segment groups CVE numbers into 1000-blocks (e.g., 29002 → 29xxx)
+- JSON schema: CVE Record v5.1, references at `.containers.cna.references[].url`
 - ArchiveBox runs as a Docker container (`archivebox/archivebox`) for one-off archive jobs
 - ArchiveBox outputs: PDF, screenshot (format TBD — PNG or JPEG), WARC directory with resources + tgz
 - User wants only the compressed WARC archive (tgz/zip), not the raw WARC directory
