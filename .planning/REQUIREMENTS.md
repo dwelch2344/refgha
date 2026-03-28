@@ -15,10 +15,10 @@
 - [x] **ARCH-04**: Individual URL failures don't kill the entire workflow (continue-on-error)
 
 ### Artifact Management
-- [ ] **ART-01**: Each matrix job uploads its 3 output files as a per-reference GitHub Actions artifact
-- [ ] **ART-02**: A collect step bundles all per-reference artifacts into a single per-CVE artifact
-- [ ] **ART-03**: The bundle step runs even if some archive jobs fail (`if: always()`)
-- [ ] **ART-04**: Workflow summary shows success/failure counts per URL
+- [x] **ART-01**: Each matrix job uploads its 3 output files as a per-reference GitHub Actions artifact
+- [x] **ART-02**: A collect step bundles all per-reference artifacts into a single per-CVE artifact
+- [x] **ART-03**: The bundle step runs even if some archive jobs fail (`if: always()`)
+- [x] **ART-04**: Workflow summary shows success/failure counts per URL
 
 ### Local Testing
 - [x] **TEST-01**: Project includes ACT configuration (.actrc) for local workflow execution
@@ -56,9 +56,9 @@
 | ARCH-03 | Phase 2 | Complete |
 | ARCH-04 | Phase 2 | Complete |
 | TEST-01 | Phase 2 | Complete |
-| ART-01 | Phase 3 | Pending |
-| ART-02 | Phase 3 | Pending |
-| ART-03 | Phase 3 | Pending |
-| ART-04 | Phase 3 | Pending |
+| ART-01 | Phase 3 | Complete |
+| ART-02 | Phase 3 | Complete |
+| ART-03 | Phase 3 | Complete |
+| ART-04 | Phase 3 | Complete |
 | TEST-02 | Phase 3 | Pending |
 | BATCH-01 | Phase 4 | Pending |

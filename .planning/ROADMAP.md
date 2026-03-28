@@ -63,7 +63,7 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 03-01-PLAN.md — Matrix fan-out wiring and collect job: wire archive to prepare matrix, add collect job with bundle and summary
+- [x] 03-01-PLAN.md — Matrix fan-out wiring and collect job: wire archive to prepare matrix, add collect job with bundle and summary
 - [ ] 03-02-PLAN.md — End-to-end verification: YAML validation, ACT smoke test, human checkpoint with CVE-2021-44228
 
 ### Phase 4: Batch Mode
@@ -85,5 +85,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 |-------|----------------|--------|-----------|
 | 1. Data Pipeline | 0/3 | Planned | - |
 | 2. ArchiveBox Integration | 0/2 | Planned | - |
-| 3. Full Single-CVE Workflow | 0/2 | Planned | - |
+| 3. Full Single-CVE Workflow | 1/2 | In Progress|  |
 | 4. Batch Mode | 0/? | Not started | - |
