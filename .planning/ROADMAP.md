@@ -12,7 +12,7 @@ Four phases deliver a GitHub Action that archives CVE reference URLs into durabl
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Data Pipeline** - Prepare job accepts a CVE ID, fetches MITRE API, extracts reference URLs, handles edge cases
+- [ ] **Phase 1: Data Pipeline** - Prepare job accepts a CVE ID, fetches GitHub raw content, extracts reference URLs, handles edge cases
 - [ ] **Phase 2: ArchiveBox Integration** - Single-URL archiving via Docker one-shot produces PDF, screenshot, and compressed WARC
 - [ ] **Phase 3: Full Single-CVE Workflow** - Dynamic matrix fan-out, per-reference artifact uploads, and bundle collection wired end-to-end
 - [ ] **Phase 4: Batch Mode** - Workflow accepts multiple CVE IDs and invokes the single-CVE pipeline for each
@@ -20,15 +20,20 @@ Decimal phases appear between their surrounding integers in numeric order.
 ## Phase Details
 
 ### Phase 1: Data Pipeline
-**Goal**: The workflow can accept a CVE ID, fetch its reference URLs from the MITRE API, and hand a well-formed URL list to downstream jobs
+**Goal**: The workflow can accept a CVE ID, fetch its reference URLs from CVEProject/cvelistV5 GitHub raw content, and hand a well-formed URL list to downstream jobs
 **Depends on**: Nothing (first phase)
 **Requirements**: PIPE-01, PIPE-02, PIPE-03, PIPE-04
 **Success Criteria** (what must be TRUE):
   1. User can trigger the workflow manually via workflow_dispatch with a CVE ID input
-  2. Given a valid CVE ID, the prepare job fetches the MITRE API and extracts all reference URLs
+  2. Given a valid CVE ID, the prepare job fetches GitHub raw content and extracts all reference URLs
   3. Given a CVE with zero references, the workflow exits cleanly with a summary (no error, no empty matrix crash)
   4. The prepare job emits a fromJSON-compatible matrix output consumable by downstream jobs
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] 01-01-PLAN.md — Workflow scaffold: workflow_dispatch trigger, CVE ID validation, GitHub raw content fetch
+- [ ] 01-02-PLAN.md — Extraction and output: null-safe jq URL extraction, empty-reference guard, matrix JSON construction
+- [ ] 01-03-PLAN.md — Human verification: end-to-end test against CVE-2021-44228, CVE-1999-0001, and invalid input
 
 ### Phase 2: ArchiveBox Integration
 **Goal**: A single reference URL can be archived by ArchiveBox running as a Docker one-shot container, producing PDF, screenshot, and compressed WARC outputs, with local ACT testability confirmed
@@ -71,7 +76,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Data Pipeline | 0/? | Not started | - |
+| 1. Data Pipeline | 0/3 | Planned | - |
 | 2. ArchiveBox Integration | 0/? | Not started | - |
 | 3. Full Single-CVE Workflow | 0/? | Not started | - |
 | 4. Batch Mode | 0/? | Not started | - |
