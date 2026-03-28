@@ -9,10 +9,10 @@
 - [x] **PIPE-04**: Action handles CVEs with zero references gracefully (no-op, clear summary)
 
 ### Archiving
-- [ ] **ARCH-01**: Each reference URL is archived by ArchiveBox running as a Docker one-shot container
-- [ ] **ARCH-02**: Each archive produces PDF, screenshot, and compressed WARC (tgz) outputs
-- [ ] **ARCH-03**: Only PDF, screenshot, and WARC extractors are enabled (all others disabled)
-- [ ] **ARCH-04**: Individual URL failures don't kill the entire workflow (continue-on-error)
+- [x] **ARCH-01**: Each reference URL is archived by ArchiveBox running as a Docker one-shot container
+- [x] **ARCH-02**: Each archive produces PDF, screenshot, and compressed WARC (tgz) outputs
+- [x] **ARCH-03**: Only PDF, screenshot, and WARC extractors are enabled (all others disabled)
+- [x] **ARCH-04**: Individual URL failures don't kill the entire workflow (continue-on-error)
 
 ### Artifact Management
 - [ ] **ART-01**: Each matrix job uploads its 3 output files as a per-reference GitHub Actions artifact
@@ -21,7 +21,7 @@
 - [ ] **ART-04**: Workflow summary shows success/failure counts per URL
 
 ### Local Testing
-- [ ] **TEST-01**: Project includes ACT configuration (.actrc) for local workflow execution
+- [x] **TEST-01**: Project includes ACT configuration (.actrc) for local workflow execution
 - [ ] **TEST-02**: End-to-end test validates the full pipeline with a known CVE ID
 
 ### Batch Mode
@@ -51,11 +51,11 @@
 | PIPE-02 | Phase 1 | Complete |
 | PIPE-03 | Phase 1 | Complete |
 | PIPE-04 | Phase 1 | Complete |
-| ARCH-01 | Phase 2 | Pending |
-| ARCH-02 | Phase 2 | Pending |
-| ARCH-03 | Phase 2 | Pending |
-| ARCH-04 | Phase 2 | Pending |
-| TEST-01 | Phase 2 | Pending |
+| ARCH-01 | Phase 2 | Complete |
+| ARCH-02 | Phase 2 | Complete |
+| ARCH-03 | Phase 2 | Complete |
+| ARCH-04 | Phase 2 | Complete |
+| TEST-01 | Phase 2 | Complete |
 | ART-01 | Phase 3 | Pending |
 | ART-02 | Phase 3 | Pending |
 | ART-03 | Phase 3 | Pending |

@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-data-pipeline-01-02-PLAN.md
-last_updated: "2026-03-28T22:17:33.221Z"
+stopped_at: Completed 02-archivebox-integration-02-01-PLAN.md
+last_updated: "2026-03-28T22:31:33.612Z"
 last_activity: 2026-03-28
 progress:
   total_phases: 4
   completed_phases: 1
-  total_plans: 3
-  completed_plans: 3
+  total_plans: 5
+  completed_plans: 4
   percent: 0
 ---
 
@@ -21,12 +21,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-28)
 
 **Core value:** Every reference URL for a given CVE is reliably archived into durable formats (PDF, screenshot, WARC) before the content disappears.
-**Current focus:** Phase 01 — data-pipeline
+**Current focus:** Phase 02 — archivebox-integration
 
 ## Current Position
 
-Phase: 2
-Plan: Not started
+Phase: 02 (archivebox-integration) — EXECUTING
+Plan: 2 of 2
 Status: Ready to execute
 Last activity: 2026-03-28
 
@@ -54,6 +54,7 @@ Progress: [░░░░░░░░░░] 0%
 *Updated after each plan completion*
 | Phase 01-data-pipeline P01 | 2 | 1 tasks | 1 files |
 | Phase 01-data-pipeline P02 | 2 | 1 tasks | 1 files |
+| Phase 02-archivebox-integration P01 | 99s | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -70,6 +71,8 @@ Recent decisions affecting current work:
 - [Phase 01-data-pipeline]: Use printf '%s' not echo to pipe URLS into jq/grep — avoids trailing newline creating phantom empty URL
 - [Phase 01-data-pipeline]: tojson at end of jq pipeline produces single-line JSON string required for GITHUB_OUTPUT echo
 - [Phase 01-data-pipeline]: exit 0 in zero-reference branch — job succeeds cleanly when no URLs exist (no archive needed)
+- [Phase 02-archivebox-integration]: SAVE_WGET=True kept alongside SAVE_WARC=True due to wget/WARC internal coupling (ArchiveBox issue #1177)
+- [Phase 02-archivebox-integration]: archive job has no needs: prepare in Phase 2 — standalone with hardcoded URL, matrix wiring deferred to Phase 3
 
 ### Pending Todos
 
@@ -83,6 +86,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-28T20:49:11.078Z
-Stopped at: Completed 01-data-pipeline-01-02-PLAN.md
+Last session: 2026-03-28T22:31:33.609Z
+Stopped at: Completed 02-archivebox-integration-02-01-PLAN.md
 Resume file: None

@@ -47,7 +47,7 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 02-01-PLAN.md — ACT configuration (.actrc) and archive job: ArchiveBox one-shot, extractor flags, WARC compression, artifact upload
+- [x] 02-01-PLAN.md — ACT configuration (.actrc) and archive job: ArchiveBox one-shot, extractor flags, WARC compression, artifact upload
 - [ ] 02-02-PLAN.md — Local ACT verification: run archive job, confirm pdf.pdf + screenshot.png + warc.tgz produced
 
 ### Phase 3: Full Single-CVE Workflow
