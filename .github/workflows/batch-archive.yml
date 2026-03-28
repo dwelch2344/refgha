@@ -1,0 +1,68 @@
+name: Batch Archive CVE References
+
+on:
+  workflow_dispatch:
+    inputs:
+      cve_ids:
+        description: |
+          CVE IDs to archive, one per line.
+          Example:
+            CVE-2021-44228
+            CVE-2023-44487
+            CVE-2024-3094
+        required: true
+        type: string
+
+jobs:
+  batch:
+    name: Parse CVE list
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.parse.outputs.matrix }}
+      cve_count: ${{ steps.parse.outputs.cve_count }}
+    steps:
+      - name: Parse and validate CVE ID list
+        id: parse
+        run: |
+          set -euo pipefail
+
+          # Split input on newlines (and commas as a convenience), strip whitespace,
+          # filter to valid CVE ID format only, emit JSON array.
+          VALID_CVES=$(printf '%s' "${{ inputs.cve_ids }}" \
+            | tr ',' '\n' \
+            | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
+            | grep -E '^CVE-[0-9]{4}-[0-9]{4,}$' \
+            || true)
+
+          CVE_COUNT=$(printf '%s' "$VALID_CVES" | grep -c . 2>/dev/null || echo "0")
+
+          if [ "$CVE_COUNT" -eq 0 ]; then
+            echo "::error::No valid CVE IDs found in input. Each line must match CVE-YYYY-NNNNN." >&2
+            exit 1
+          fi
+
+          MATRIX=$(printf '%s' "$VALID_CVES" \
+            | jq -R -s 'split("\n") | map(select(length > 0)) | tojson')
+
+          echo "matrix=${MATRIX}" >> "$GITHUB_OUTPUT"
+          echo "cve_count=${CVE_COUNT}" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Batch run: ${CVE_COUNT} CVE(s) queued"
+            echo ""
+            printf '%s\n' "$VALID_CVES" | while read -r cve; do
+              echo "- ${cve}"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  per-cve:
+    name: Archive ${{ matrix.cve_id }}
+    needs: batch
+    if: needs.batch.outputs.matrix != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        cve_id: ${{ fromJSON(needs.batch.outputs.matrix) }}
+    uses: ./.github/workflows/archive-cve.yml
+    with:
+      cve_id: ${{ matrix.cve_id }}

@@ -7,6 +7,12 @@ on:
         description: 'CVE ID to archive (e.g. CVE-2021-44228)'
         required: true
         type: string
+  workflow_call:
+    inputs:
+      cve_id:
+        description: 'CVE ID to archive (e.g. CVE-2021-44228)'
+        required: true
+        type: string
 
 jobs:
   prepare:
