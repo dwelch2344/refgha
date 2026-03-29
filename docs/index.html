@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CVE Reference Archive</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace; background: #0d1117; color: #c9d1d9; line-height: 1.6; }
+    a { color: #58a6ff; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .container { max-width: 960px; margin: 0 auto; padding: 24px; }
+
+    header { border-bottom: 1px solid #21262d; padding-bottom: 16px; margin-bottom: 24px; }
+    header h1 { font-size: 24px; color: #f0f6fc; }
+    header p { color: #8b949e; font-size: 14px; margin-top: 4px; }
+
+    nav { display: flex; gap: 8px; margin-bottom: 24px; }
+    nav a { padding: 6px 16px; border-radius: 6px; background: #21262d; color: #c9d1d9; font-size: 14px; font-weight: 500; }
+    nav a.active { background: #1f6feb; color: #fff; }
+
+    .breadcrumb { font-size: 13px; color: #8b949e; margin-bottom: 16px; }
+    .breadcrumb a { color: #8b949e; }
+    .breadcrumb a:hover { color: #58a6ff; }
+    .breadcrumb .sep { margin: 0 4px; }
+
+    .search { margin-bottom: 16px; }
+    .search input { width: 100%; padding: 8px 12px; background: #161b22; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; font-size: 14px; font-family: inherit; }
+    .search input::placeholder { color: #484f58; }
+    .search input:focus { outline: none; border-color: #1f6feb; }
+
+    .list { border: 1px solid #21262d; border-radius: 6px; overflow: hidden; }
+    .list-item { display: flex; align-items: center; padding: 10px 16px; border-bottom: 1px solid #21262d; }
+    .list-item:last-child { border-bottom: none; }
+    .list-item:hover { background: #161b22; }
+    .list-item .icon { margin-right: 10px; font-size: 16px; opacity: 0.6; }
+    .list-item .name { flex: 1; font-size: 14px; }
+    .list-item .meta { color: #8b949e; font-size: 12px; }
+
+    .assets { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+    .asset-card { border: 1px solid #21262d; border-radius: 6px; padding: 16px; text-align: center; }
+    .asset-card:hover { border-color: #30363d; background: #161b22; }
+    .asset-card .type { font-size: 12px; color: #8b949e; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+    .asset-card .name { font-size: 14px; word-break: break-all; }
+    .asset-card .size { font-size: 12px; color: #484f58; margin-top: 4px; }
+
+    .stats { display: flex; gap: 24px; margin-bottom: 24px; }
+    .stat { text-align: center; }
+    .stat .num { font-size: 28px; font-weight: 700; color: #f0f6fc; }
+    .stat .label { font-size: 12px; color: #8b949e; text-transform: uppercase; letter-spacing: 1px; }
+
+    .loading { text-align: center; padding: 48px; color: #8b949e; }
+    .empty { text-align: center; padding: 48px; color: #484f58; }
+
+    .pagination { display: flex; justify-content: center; gap: 8px; margin-top: 16px; }
+    .pagination a { padding: 4px 12px; border-radius: 4px; background: #21262d; font-size: 13px; }
+    .pagination a.active { background: #1f6feb; color: #fff; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>CVE Reference Archive</h1>
+      <p>Archived snapshots of CVE reference URLs — PDF, screenshot, and WARC</p>
+    </header>
+    <div id="app"><div class="loading">Loading...</div></div>
+  </div>
+
+  <script>
+    const S3_BASE = 'https://archiver-demo-v1-public.s3.amazonaws.com';
+    const DATA_BASE = './data';
+    const PER_PAGE = 50;
+
+    let manifest = null;
+
+    async function loadManifest() {
+      if (manifest) return manifest;
+      const r = await fetch(`${DATA_BASE}/manifest.json`);
+      manifest = await r.json();
+      return manifest;
+    }
+
+    async function loadJSON(path) {
+      try {
+        const r = await fetch(`${DATA_BASE}/${path}`);
+        if (!r.ok) return null;
+        return await r.json();
+      } catch { return null; }
+    }
+
+    function h(tag, attrs, ...children) {
+      const el = document.createElement(tag);
+      if (attrs) Object.entries(attrs).forEach(([k, v]) => {
+        if (k === 'onclick') el.addEventListener('click', v);
+        else if (k === 'className') el.className = v;
+        else el.setAttribute(k, v);
+      });
+      children.flat().forEach(c => {
+        if (c == null) return;
+        el.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+      });
+      return el;
+    }
+
+    function render(...els) {
+      const app = document.getElementById('app');
+      app.innerHTML = '';
+      els.forEach(el => app.appendChild(el));
+    }
+
+    function nav(active) {
+      return h('nav', null,
+        h('a', { href: '#/', className: active === 'domains' ? 'active' : '' }, 'By Domain'),
+        h('a', { href: '#/cves', className: active === 'cves' ? 'active' : '' }, 'By CVE'),
+      );
+    }
+
+    function breadcrumb(...parts) {
+      const bc = h('div', { className: 'breadcrumb' });
+      parts.forEach((p, i) => {
+        if (i > 0) bc.appendChild(h('span', { className: 'sep' }, ' / '));
+        if (p.href) bc.appendChild(h('a', { href: p.href }, p.text));
+        else bc.appendChild(h('span', null, p.text));
+      });
+      return bc;
+    }
+
+    function searchBox(items, renderFn, placeholder) {
+      const wrap = h('div', null);
+      const input = h('input', { type: 'text', placeholder });
+      const searchDiv = h('div', { className: 'search' }, input);
+      wrap.appendChild(searchDiv);
+      const listDiv = h('div', null);
+      wrap.appendChild(listDiv);
+
+      function update(filter) {
+        const filtered = filter
+          ? items.filter(it => (it.searchText || it.name || '').toLowerCase().includes(filter.toLowerCase()))
+          : items;
+        listDiv.innerHTML = '';
+        listDiv.appendChild(renderFn(filtered.slice(0, PER_PAGE)));
+        if (filtered.length > PER_PAGE) {
+          listDiv.appendChild(h('div', { className: 'empty' }, `Showing ${PER_PAGE} of ${filtered.length} — use search to filter`));
+        }
+      }
+
+      input.addEventListener('input', () => update(input.value));
+      update('');
+      return wrap;
+    }
+
+    function listEl(items) {
+      if (!items.length) return h('div', { className: 'empty' }, 'No items found');
+      const list = h('div', { className: 'list' });
+      items.forEach(it => {
+        list.appendChild(h('div', { className: 'list-item' },
+          h('span', { className: 'icon' }, it.icon || ''),
+          h('a', { href: it.href, className: 'name' }, it.name),
+          it.meta ? h('span', { className: 'meta' }, it.meta) : null,
+        ));
+      });
+      return list;
+    }
+
+    // ---- ROUTES ----
+
+    async function routeHome() {
+      const m = await loadManifest();
+      const items = m.domains.map(d => ({
+        name: d.domain,
+        icon: '\uD83C\uDF10',
+        href: `#/domain/${encodeURIComponent(d.domain)}`,
+        meta: `${d.url_count} URLs`,
+        searchText: d.domain,
+      }));
+      render(
+        nav('domains'),
+        h('div', { className: 'stats' },
+          h('div', { className: 'stat' }, h('div', { className: 'num' }, String(m.total_domains)), h('div', { className: 'label' }, 'Domains')),
+          h('div', { className: 'stat' }, h('div', { className: 'num' }, String(m.total_urls)), h('div', { className: 'label' }, 'URLs')),
+          h('div', { className: 'stat' }, h('div', { className: 'num' }, String(m.total_snapshots)), h('div', { className: 'label' }, 'Snapshots')),
+          h('div', { className: 'stat' }, h('div', { className: 'num' }, String(m.total_cves)), h('div', { className: 'label' }, 'CVEs')),
+        ),
+        searchBox(items, listEl, 'Search domains...'),
+      );
+    }
+
+    async function routeDomain(domain) {
+      const data = await loadJSON(`domains/${encodeURIComponent(domain)}.json`);
+      if (!data) { render(h('div', { className: 'empty' }, 'Domain not found')); return; }
+      const items = data.urls.map(u => ({
+        name: u.path + (u.query ? `?${u.query}` : ''),
+        icon: '\uD83D\uDD17',
+        href: `#/url/${encodeURIComponent(u.original_url)}`,
+        meta: `${u.snapshots.length} snapshot${u.snapshots.length !== 1 ? 's' : ''}`,
+        searchText: u.original_url,
+      }));
+      render(
+        nav('domains'),
+        breadcrumb({ href: '#/', text: 'Domains' }, { text: domain }),
+        searchBox(items, listEl, `Search ${domain} URLs...`),
+      );
+    }
+
+    async function routeUrl(url) {
+      const m = await loadManifest();
+      // Find which domain this URL belongs to
+      let domain;
+      try { domain = new URL(url).hostname; } catch { render(h('div', { className: 'empty' }, 'Invalid URL')); return; }
+      const data = await loadJSON(`domains/${encodeURIComponent(domain)}.json`);
+      if (!data) { render(h('div', { className: 'empty' }, 'Domain not found')); return; }
+      const entry = data.urls.find(u => u.original_url === url);
+      if (!entry) { render(h('div', { className: 'empty' }, 'URL not found')); return; }
+
+      const items = entry.snapshots.map(s => ({
+        name: s.timestamp,
+        icon: '\uD83D\uDCC5',
+        href: `#/snapshot/${encodeURIComponent(s.s3_prefix)}`,
+        meta: `${s.files.length} files`,
+      }));
+      render(
+        nav('domains'),
+        breadcrumb(
+          { href: '#/', text: 'Domains' },
+          { href: `#/domain/${encodeURIComponent(domain)}`, text: domain },
+          { text: entry.path + (entry.query ? `?${entry.query}` : '') }
+        ),
+        h('p', { style: 'margin-bottom:12px;font-size:13px;color:#8b949e' },
+          h('a', { href: url, target: '_blank' }, url)
+        ),
+        listEl(items),
+      );
+    }
+
+    async function routeSnapshot(s3Prefix) {
+      const files = ['output.pdf', 'screenshot.png', 'warc.tgz'];
+      const cards = h('div', { className: 'assets' });
+      files.forEach(f => {
+        const url = `${S3_BASE}/${s3Prefix}/${f}`;
+        const type = f.endsWith('.pdf') ? 'PDF' : f.endsWith('.png') ? 'Screenshot' : 'WARC Archive';
+        cards.appendChild(h('div', { className: 'asset-card' },
+          h('div', { className: 'type' }, type),
+          h('a', { href: url, target: '_blank', className: 'name' }, f),
+        ));
+      });
+
+      // Parse prefix for breadcrumbs
+      const parts = s3Prefix.split('/');
+      const timestamp = parts[parts.length - 1];
+      const urlParts = parts.slice(1, -1);
+      const domain = urlParts[0];
+
+      render(
+        nav('domains'),
+        breadcrumb(
+          { href: '#/', text: 'Domains' },
+          { href: `#/domain/${encodeURIComponent(domain)}`, text: domain },
+          { text: timestamp }
+        ),
+        h('h3', { style: 'margin-bottom:16px;color:#f0f6fc' }, `Snapshot: ${timestamp}`),
+        cards,
+      );
+    }
+
+    async function routeCves() {
+      const m = await loadManifest();
+      const items = m.cves.map(c => ({
+        name: c.cve_id,
+        icon: '\uD83D\uDEE1\uFE0F',
+        href: `#/cve/${c.cve_id}`,
+        meta: `${c.snapshot_count} snapshots`,
+        searchText: c.cve_id,
+      }));
+      render(
+        nav('cves'),
+        h('div', { className: 'stats' },
+          h('div', { className: 'stat' }, h('div', { className: 'num' }, String(m.total_cves)), h('div', { className: 'label' }, 'CVEs')),
+        ),
+        searchBox(items, listEl, 'Search CVEs (e.g. CVE-2024-3094)...'),
+      );
+    }
+
+    async function routeCve(cveId) {
+      const data = await loadJSON(`cves/${cveId}.json`);
+      if (!data) { render(nav('cves'), h('div', { className: 'empty' }, `No data for ${cveId}`)); return; }
+
+      // Group snapshots by URL
+      const byUrl = {};
+      (data.snapshots || []).forEach(s => {
+        if (!byUrl[s.url]) byUrl[s.url] = [];
+        byUrl[s.url].push(s);
+      });
+
+      const items = Object.entries(byUrl).map(([url, snaps]) => ({
+        name: url,
+        icon: '\uD83D\uDD17',
+        href: `#/cve/${cveId}/ref/${encodeURIComponent(url)}`,
+        meta: `${snaps.length} snapshot${snaps.length !== 1 ? 's' : ''}`,
+        searchText: url,
+      }));
+
+      render(
+        nav('cves'),
+        breadcrumb({ href: '#/cves', text: 'CVEs' }, { text: cveId }),
+        h('p', { style: 'margin-bottom:12px;font-size:13px' },
+          h('a', { href: `https://www.cve.org/CVERecord?id=${cveId}`, target: '_blank' }, `View on cve.org`)
+        ),
+        searchBox(items, listEl, 'Search references...'),
+      );
+    }
+
+    async function routeCveRef(cveId, refUrl) {
+      const data = await loadJSON(`cves/${cveId}.json`);
+      if (!data) { render(h('div', { className: 'empty' }, 'Not found')); return; }
+      const snaps = (data.snapshots || []).filter(s => s.url === refUrl);
+
+      const items = snaps.map(s => ({
+        name: s.timestamp,
+        icon: '\uD83D\uDCC5',
+        href: `#/snapshot/${encodeURIComponent(s.s3_prefix)}`,
+        meta: `${s.files.length} files`,
+      }));
+
+      render(
+        nav('cves'),
+        breadcrumb(
+          { href: '#/cves', text: 'CVEs' },
+          { href: `#/cve/${cveId}`, text: cveId },
+          { text: refUrl }
+        ),
+        h('p', { style: 'margin-bottom:12px;font-size:13px;color:#8b949e' },
+          h('a', { href: refUrl, target: '_blank' }, refUrl)
+        ),
+        listEl(items),
+      );
+    }
+
+    // ---- ROUTER ----
+
+    async function route() {
+      const hash = location.hash || '#/';
+      const path = hash.slice(1);
+
+      try {
+        if (path === '/' || path === '') return routeHome();
+        if (path === '/cves') return routeCves();
+
+        let m;
+        if (m = path.match(/^\/domain\/(.+)$/)) return routeDomain(decodeURIComponent(m[1]));
+        if (m = path.match(/^\/url\/(.+)$/)) return routeUrl(decodeURIComponent(m[1]));
+        if (m = path.match(/^\/snapshot\/(.+)$/)) return routeSnapshot(decodeURIComponent(m[1]));
+        if (m = path.match(/^\/cve\/([^/]+)\/ref\/(.+)$/)) return routeCveRef(m[1], decodeURIComponent(m[2]));
+        if (m = path.match(/^\/cve\/([^/]+)$/)) return routeCve(m[1]);
+
+        render(h('div', { className: 'empty' }, 'Page not found'));
+      } catch (e) {
+        render(h('div', { className: 'empty' }, `Error: ${e.message}`));
+      }
+    }
+
+    window.addEventListener('hashchange', route);
+    route();
+  </script>
+</body>
+</html>

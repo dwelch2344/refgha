@@ -1,0 +1,70 @@
+name: Generate Site Data
+
+on:
+  schedule:
+    - cron: '30 * * * *'  # Every hour at :30 (offset from crawl at :00)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    name: Generate site data from S3
+    runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
+      S3_BUCKET: archiver-demo-v1-public
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: List S3 objects
+        run: |
+          aws s3 ls "s3://${S3_BUCKET}/v2/" --recursive > /tmp/s3-listing.txt
+          echo "S3 objects: $(wc -l < /tmp/s3-listing.txt)"
+
+      - name: Download CVE index files
+        run: |
+          mkdir -p /tmp/cve-indexes
+          aws s3 sync "s3://${S3_BUCKET}/v2/index/" /tmp/cve-indexes/ --exclude "*" --include "CVE-*.json"
+          echo "CVE indexes: $(ls /tmp/cve-indexes/*.json 2>/dev/null | wc -l)"
+
+      - name: Generate site data
+        run: |
+          python3 scripts/generate-site-data.py docs /tmp/cve-indexes /tmp/s3-listing.txt
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/data/
+          if git diff --cached --quiet; then
+            echo "No changes to site data"
+          else
+            FILE_COUNT=$(git diff --cached --name-only | wc -l | tr -d ' ')
+            git commit -m "chore: regenerate site data (${FILE_COUNT} files updated)"
+            git push
+          fi
+
+      - name: Summary
+        run: |
+          {
+            echo "### Site Data Generated"
+            echo ""
+            cat docs/data/manifest.json | python3 -c "
+          import json, sys
+          m = json.load(sys.stdin)
+          print(f'| Metric | Value |')
+          print(f'|--------|-------|')
+          print(f'| Domains | {m[\"total_domains\"]} |')
+          print(f'| URLs | {m[\"total_urls\"]} |')
+          print(f'| Snapshots | {m[\"total_snapshots\"]} |')
+          print(f'| CVEs | {m[\"total_cves\"]} |')
+          print(f'| Generated | {m[\"generated\"]} |')
+          "
+          } >> "$GITHUB_STEP_SUMMARY"
