@@ -8,7 +8,12 @@ on:
       max_commits:
         description: 'Max commits to process (0 = unlimited)'
         required: false
-        default: '50'
+        default: '100'
+        type: string
+      max_cves:
+        description: 'Max CVEs to archive per run (GHA 256 matrix limit)'
+        required: false
+        default: '15'
         type: string
       dry_run:
         description: 'Dry run — log what would be archived but skip actual archival'
@@ -39,7 +44,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          MAX_COMMITS="${{ inputs.max_commits || '50' }}"
+          MAX_COMMITS="${{ inputs.max_commits || '100' }}"
+          MAX_CVES="${{ inputs.max_cves || '15' }}"
           DRY_RUN="${{ inputs.dry_run || 'false' }}"
 
           # Read last processed SHA
@@ -86,11 +92,14 @@ jobs:
             echo "Limiting to $MAX_COMMITS commits" >&2
           fi
 
-          # Walk commits, collect unique CVE IDs that have references
-          CVES_WITH_REFS=""
+          # Walk commits, collect unique CVE IDs that have references.
+          # Stop early if we hit MAX_CVES — only advance SHA to last fully processed commit.
+          rm -f /tmp/cves_with_refs.txt /tmp/latest_sha.txt
           LATEST_SHA="$LAST_SHA"
+          COMMITS_PROCESSED=0
+          HIT_CVE_CAP="false"
 
-          echo "$COMMIT_SHAS" | while read -r SHA; do
+          for SHA in $COMMIT_SHAS; do
             [ -z "$SHA" ] && continue
 
             # Get changed CVE files in this commit
@@ -98,7 +107,6 @@ jobs:
               --jq '[.files[] | select(.filename | test("^cves/.*\\.json$")) | select(.filename | test("delta|deltaLog") | not) | .filename] | .[]' 2>/dev/null || true)
 
             for FILE in $FILES; do
-              # Extract CVE ID from filename: cves/2025/29xxx/CVE-2025-29002.json → CVE-2025-29002
               CVE_ID=$(basename "$FILE" .json)
 
               # Fetch the CVE JSON and check if it has references
@@ -110,24 +118,34 @@ jobs:
               fi
             done
 
-            echo "$SHA" > /tmp/latest_sha.txt
+            # Check CVE count after each commit
+            if [ -f /tmp/cves_with_refs.txt ]; then
+              CURRENT_COUNT=$(sort -u /tmp/cves_with_refs.txt | grep -c . 2>/dev/null || echo "0")
+            else
+              CURRENT_COUNT=0
+            fi
+
+            LATEST_SHA="$SHA"
+            COMMITS_PROCESSED=$((COMMITS_PROCESSED + 1))
+
+            if [ "$MAX_CVES" != "0" ] && [ "$CURRENT_COUNT" -ge "$MAX_CVES" ]; then
+              echo "Hit CVE cap ($MAX_CVES) after $COMMITS_PROCESSED commits" >&2
+              HIT_CVE_CAP="true"
+              break
+            fi
           done
 
-          # Read results (subshell workaround for while-read pipe)
-          if [ -f /tmp/latest_sha.txt ]; then
-            LATEST_SHA=$(cat /tmp/latest_sha.txt)
-          fi
-
-          # Deduplicate CVE list
+          # Deduplicate and cap CVE list
           if [ -f /tmp/cves_with_refs.txt ]; then
-            UNIQUE_CVES=$(sort -u /tmp/cves_with_refs.txt)
+            UNIQUE_CVES=$(sort -u /tmp/cves_with_refs.txt | head -n "$MAX_CVES")
             CVE_COUNT=$(echo "$UNIQUE_CVES" | grep -c . 2>/dev/null || echo "0")
           else
             UNIQUE_CVES=""
             CVE_COUNT=0
           fi
 
-          echo "Found $CVE_COUNT unique CVEs with references across $TOTAL commits" >&2
+          REMAINING=$((TOTAL - COMMITS_PROCESSED))
+          echo "Found $CVE_COUNT unique CVEs across $COMMITS_PROCESSED commits ($REMAINING remaining)" >&2
 
           # Build JSON array for matrix
           if [ "$CVE_COUNT" -gt 0 ]; then
@@ -150,8 +168,10 @@ jobs:
             echo ""
             echo "| Metric | Value |"
             echo "|--------|-------|"
-            echo "| Commits processed | $TOTAL |"
-            echo "| CVEs with references | $CVE_COUNT |"
+            echo "| Commits processed | $COMMITS_PROCESSED / $TOTAL |"
+            echo "| Commits remaining | $REMAINING |"
+            echo "| CVEs to archive | $CVE_COUNT (cap: $MAX_CVES) |"
+            echo "| Hit CVE cap | $HIT_CVE_CAP |"
             echo "| Last SHA | \`${LATEST_SHA:0:12}\` |"
             echo "| Dry run | $DRY_RUN |"
             if [ "$CVE_COUNT" -gt 0 ]; then
