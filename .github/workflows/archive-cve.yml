@@ -213,7 +213,7 @@ jobs:
           fi
 
           # ISO 8601 UTC timestamp folder
-          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          TIMESTAMP=$(date -u +"%Y%m%d-%H%M%S")
           S3_PREFIX="${S3_PREFIX}/${TIMESTAMP}"
 
           echo "S3 prefix: s3://${S3_BUCKET}/${S3_PREFIX}" >&2
@@ -313,7 +313,7 @@ jobs:
               })
 
           idx['snapshots'].sort(key=lambda x: x['timestamp'], reverse=True)
-          idx['last_updated'] = '$(date -u +"%Y-%m-%dT%H:%M:%SZ")'
+          idx['last_updated'] = '$(date -u +"%Y%m%d-%H%M%S")'
           idx['total_snapshots'] = len(idx['snapshots'])
 
           json.dump(idx, open('/tmp/cve_index_updated.json', 'w'), indent=2)
