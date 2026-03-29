@@ -80,10 +80,12 @@ jobs:
             PAGE=$((PAGE + 1))
           done
 
-          # Reverse to chronological order, remove the last-processed SHA itself
-          COMMIT_SHAS=$(echo "$ALL_SHAS" | grep -v "^$" | tac | grep -v "^${LAST_SHA}$" || true)
+          # Write to file to avoid broken pipe with large lists
+          echo "$ALL_SHAS" | grep -v "^$" > /tmp/all_shas.txt || true
+          # Reverse to chronological order, remove the last-processed SHA
+          tac /tmp/all_shas.txt | grep -v "^${LAST_SHA}$" > /tmp/commit_shas.txt || true
 
-          TOTAL=$(echo "$COMMIT_SHAS" | grep -c . 2>/dev/null || echo "0")
+          TOTAL=$(wc -l < /tmp/commit_shas.txt | tr -d ' ')
           echo "Found $TOTAL new commits since $LAST_SHA" >&2
 
           if [ "$TOTAL" -eq 0 ]; then
@@ -95,7 +97,8 @@ jobs:
 
           # Apply max_commits limit
           if [ "$MAX_COMMITS" != "0" ] && [ "$TOTAL" -gt "$MAX_COMMITS" ]; then
-            COMMIT_SHAS=$(echo "$COMMIT_SHAS" | head -n "$MAX_COMMITS")
+            head -n "$MAX_COMMITS" /tmp/commit_shas.txt > /tmp/commit_shas_limited.txt
+            mv /tmp/commit_shas_limited.txt /tmp/commit_shas.txt
             TOTAL="$MAX_COMMITS"
             echo "Limiting to $MAX_COMMITS commits" >&2
           fi
@@ -107,7 +110,7 @@ jobs:
           COMMITS_PROCESSED=0
           HIT_CVE_CAP="false"
 
-          for SHA in $COMMIT_SHAS; do
+          while IFS= read -r SHA; do
             [ -z "$SHA" ] && continue
 
             # Get changed CVE files in this commit
@@ -128,7 +131,7 @@ jobs:
 
             LATEST_SHA="$SHA"
             COMMITS_PROCESSED=$((COMMITS_PROCESSED + 1))
-          done
+          done < /tmp/commit_shas.txt
 
           # Deduplicate all discovered CVEs
           if [ -f /tmp/cves_with_refs.txt ]; then
