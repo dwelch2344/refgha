@@ -175,7 +175,7 @@ jobs:
       - name: Upload archive artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ref-${{ matrix.ref.index }}
+          name: ${{ inputs.cve_id }}-ref-${{ matrix.ref.index }}
           path: |
             ${{ env.SNAPSHOT_DIR }}/output.pdf
             ${{ env.SNAPSHOT_DIR }}/screenshot.png
@@ -233,7 +233,7 @@ jobs:
       - name: Download all reference artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: ref-*
+          pattern: ${{ inputs.cve_id }}-ref-*
           merge-multiple: true
           path: collected/
 
