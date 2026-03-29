@@ -70,7 +70,7 @@
   <script>
     const S3_BASE = 'https://archiver-demo-v1-public.s3.amazonaws.com';
     const DATA_BASE = './data';
-    const PER_PAGE = 50;
+    const PER_PAGE = 30;
 
     let manifest = null;
 
@@ -126,6 +126,16 @@
       return bc;
     }
 
+    // Parse YYYYMMDD-HHMMSS into a Date and format in user's locale
+    function formatTimestamp(ts) {
+      const m = ts.match(/^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$/);
+      if (!m) return ts;
+      const d = new Date(Date.UTC(+m[1], +m[2]-1, +m[3], +m[4], +m[5], +m[6]));
+      const date = d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+      const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+      return `${date} ${time}`;
+    }
+
     function searchBox(items, renderFn, placeholder) {
       const wrap = h('div', null);
       const input = h('input', { type: 'text', placeholder });
@@ -133,20 +143,51 @@
       wrap.appendChild(searchDiv);
       const listDiv = h('div', null);
       wrap.appendChild(listDiv);
+      let currentPage = 0;
 
-      function update(filter) {
+      function update(filter, page) {
+        currentPage = page || 0;
         const filtered = filter
           ? items.filter(it => (it.searchText || it.name || '').toLowerCase().includes(filter.toLowerCase()))
           : items;
+        const totalPages = Math.ceil(filtered.length / PER_PAGE);
+        const start = currentPage * PER_PAGE;
+        const pageItems = filtered.slice(start, start + PER_PAGE);
+
         listDiv.innerHTML = '';
-        listDiv.appendChild(renderFn(filtered.slice(0, PER_PAGE)));
-        if (filtered.length > PER_PAGE) {
-          listDiv.appendChild(h('div', { className: 'empty' }, `Showing ${PER_PAGE} of ${filtered.length} — use search to filter`));
+        listDiv.appendChild(renderFn(pageItems));
+
+        if (totalPages > 1) {
+          const info = h('div', { style: 'text-align:center;color:#8b949e;font-size:13px;margin-top:12px' },
+            `Showing ${start + 1}\u2013${Math.min(start + PER_PAGE, filtered.length)} of ${filtered.length}`
+          );
+          listDiv.appendChild(info);
+
+          const pag = h('div', { className: 'pagination' });
+          if (currentPage > 0) {
+            pag.appendChild(h('a', { href: '#', onclick: (e) => { e.preventDefault(); update(filter, currentPage - 1); } }, '\u2190 Prev'));
+          }
+          const maxButtons = 7;
+          let startPage = Math.max(0, currentPage - 3);
+          let endPage = Math.min(totalPages, startPage + maxButtons);
+          if (endPage - startPage < maxButtons) startPage = Math.max(0, endPage - maxButtons);
+          for (let i = startPage; i < endPage; i++) {
+            const pageNum = i;
+            pag.appendChild(h('a', {
+              href: '#',
+              className: i === currentPage ? 'active' : '',
+              onclick: (e) => { e.preventDefault(); update(filter, pageNum); }
+            }, String(i + 1)));
+          }
+          if (currentPage < totalPages - 1) {
+            pag.appendChild(h('a', { href: '#', onclick: (e) => { e.preventDefault(); update(filter, currentPage + 1); } }, 'Next \u2192'));
+          }
+          listDiv.appendChild(pag);
         }
       }
 
-      input.addEventListener('input', () => update(input.value));
-      update('');
+      input.addEventListener('input', () => update(input.value, 0));
+      update('', 0);
       return wrap;
     }
 
@@ -214,10 +255,11 @@
       if (!entry) { render(h('div', { className: 'empty' }, 'URL not found')); return; }
 
       const items = entry.snapshots.map(s => ({
-        name: s.timestamp,
+        name: formatTimestamp(s.timestamp),
         icon: '\uD83D\uDCC5',
         href: `#/snapshot/${encodeURIComponent(s.s3_prefix)}`,
         meta: `${s.files.length} files`,
+        searchText: s.timestamp,
       }));
       render(
         nav('domains'),
@@ -229,7 +271,7 @@
         h('p', { style: 'margin-bottom:12px;font-size:13px;color:#8b949e' },
           h('a', { href: url, target: '_blank' }, url)
         ),
-        listEl(items),
+        searchBox(items, listEl, 'Search snapshots...'),
       );
     }
 
@@ -258,7 +300,7 @@
           { href: `#/domain/${encodeURIComponent(domain)}`, text: domain },
           { text: timestamp }
         ),
-        h('h3', { style: 'margin-bottom:16px;color:#f0f6fc' }, `Snapshot: ${timestamp}`),
+        h('h3', { style: 'margin-bottom:16px;color:#f0f6fc' }, `Snapshot: ${formatTimestamp(timestamp)}`),
         cards,
       );
     }
@@ -316,10 +358,11 @@
       const snaps = (data.snapshots || []).filter(s => s.url === refUrl);
 
       const items = snaps.map(s => ({
-        name: s.timestamp,
+        name: formatTimestamp(s.timestamp),
         icon: '\uD83D\uDCC5',
         href: `#/snapshot/${encodeURIComponent(s.s3_prefix)}`,
         meta: `${s.files.length} files`,
+        searchText: s.timestamp,
       }));
 
       render(
@@ -332,7 +375,7 @@
         h('p', { style: 'margin-bottom:12px;font-size:13px;color:#8b949e' },
           h('a', { href: refUrl, target: '_blank' }, refUrl)
         ),
-        listEl(items),
+        searchBox(items, listEl, 'Search snapshots...'),
       );
     }
 
