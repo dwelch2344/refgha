@@ -182,6 +182,49 @@ jobs:
             ${{ env.SNAPSHOT_DIR }}/warc.tgz
           if-no-files-found: error
 
+      - name: Upload to S3
+        if: env.SNAPSHOT_DIR != ''
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
+          S3_BUCKET: archiver-demo-v1-public
+        run: |
+          set -euo pipefail
+
+          REF_URL="${{ matrix.ref.url }}"
+
+          # Parse URL into domain, path, query
+          DOMAIN=$(echo "$REF_URL" | sed -E 's|^https?://([^/?#]+).*|\1|')
+          URI_PATH=$(echo "$REF_URL" | sed -E 's|^https?://[^/]+((/[^?#]*)?).*|\2|' | sed 's|^/||; s|/$||')
+          QUERY=$(echo "$REF_URL" | grep -oP '\?\K[^#]*' || true)
+
+          # Build S3 key prefix: v2/<domain>/<path>
+          S3_PREFIX="v2/${DOMAIN}"
+          if [ -n "$URI_PATH" ]; then
+            S3_PREFIX="${S3_PREFIX}/${URI_PATH}"
+          fi
+
+          # Append query params URL-safe if present
+          if [ -n "$QUERY" ]; then
+            # Encode query params: replace unsafe chars but keep = and &
+            ENCODED_QUERY=$(python3 -c "import urllib.parse; print(urllib.parse.quote('${QUERY}', safe='=&'))")
+            S3_PREFIX="${S3_PREFIX}__q__${ENCODED_QUERY}"
+          fi
+
+          # ISO 8601 UTC timestamp folder
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          S3_PREFIX="${S3_PREFIX}/${TIMESTAMP}"
+
+          echo "S3 prefix: s3://${S3_BUCKET}/${S3_PREFIX}" >&2
+
+          # Upload all three files
+          aws s3 cp "${SNAPSHOT_DIR}/output.pdf"     "s3://${S3_BUCKET}/${S3_PREFIX}/output.pdf"
+          aws s3 cp "${SNAPSHOT_DIR}/screenshot.png"  "s3://${S3_BUCKET}/${S3_PREFIX}/screenshot.png"
+          aws s3 cp "${SNAPSHOT_DIR}/warc.tgz"        "s3://${S3_BUCKET}/${S3_PREFIX}/warc.tgz"
+
+          echo "Uploaded 3 files to s3://${S3_BUCKET}/${S3_PREFIX}/" >&2
+
   collect:
     runs-on: ubuntu-latest
     needs: archive
