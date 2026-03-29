@@ -180,8 +180,6 @@ jobs:
             ${{ env.SNAPSHOT_DIR }}/output.pdf
             ${{ env.SNAPSHOT_DIR }}/screenshot.png
             ${{ env.SNAPSHOT_DIR }}/warc.tgz
-            ${{ env.SNAPSHOT_DIR }}/s3_prefix.txt
-            ${{ env.SNAPSHOT_DIR }}/ref_url.txt
           if-no-files-found: error
 
       - name: Upload to S3
@@ -225,10 +223,6 @@ jobs:
           aws s3 cp "${SNAPSHOT_DIR}/screenshot.png"  "s3://${S3_BUCKET}/${S3_PREFIX}/screenshot.png"
           aws s3 cp "${SNAPSHOT_DIR}/warc.tgz"        "s3://${S3_BUCKET}/${S3_PREFIX}/warc.tgz"
 
-          # Write S3 prefix to file for collect job to pick up via artifact
-          echo "${S3_PREFIX}" > "${SNAPSHOT_DIR}/s3_prefix.txt"
-          echo "${REF_URL}" > "${SNAPSHOT_DIR}/ref_url.txt"
-
           echo "Uploaded 3 files to s3://${S3_BUCKET}/${S3_PREFIX}/" >&2
 
   collect:
@@ -260,40 +254,71 @@ jobs:
           S3_BUCKET: archiver-demo-v1-public
         run: |
           set -euo pipefail
-          mkdir -p collected/
 
           CVE_ID="${{ inputs.cve_id }}"
           INDEX_KEY="v2/index/${CVE_ID}.json"
 
           # Download existing CVE index entry (or start fresh)
-          aws s3 cp "s3://${S3_BUCKET}/${INDEX_KEY}" /tmp/cve_index.json 2>/dev/null || echo '{"cve_id":"'$CVE_ID'","snapshots":[]}' > /tmp/cve_index.json
+          aws s3 cp "s3://${S3_BUCKET}/${INDEX_KEY}" /tmp/cve_index.json 2>/dev/null \
+            || echo "{\"cve_id\":\"${CVE_ID}\",\"snapshots\":[]}" > /tmp/cve_index.json
 
-          # Collect s3_prefix + ref_url pairs from this run's artifacts
-          NEW_ENTRIES="[]"
-          for PREFIX_FILE in $(find collected/ -name 's3_prefix.txt' 2>/dev/null); do
-            DIR=$(dirname "$PREFIX_FILE")
-            S3_PREFIX=$(cat "$PREFIX_FILE" | tr -d '[:space:]')
-            REF_URL=$(cat "${DIR}/ref_url.txt" 2>/dev/null | tr -d '[:space:]' || echo "unknown")
-            TIMESTAMP=$(echo "$S3_PREFIX" | rev | cut -d'/' -f1 | rev)
+          # Scan S3 for all archived files belonging to reference URLs from this CVE
+          # List everything under v2/ that has our 3 file types
+          aws s3 ls "s3://${S3_BUCKET}/v2/" --recursive \
+            | grep -E '(output\.pdf|screenshot\.png|warc\.tgz)$' \
+            | awk '{print $4}' > /tmp/s3_files.txt
 
-            NEW_ENTRIES=$(echo "$NEW_ENTRIES" | jq --arg url "$REF_URL" --arg ts "$TIMESTAMP" --arg prefix "$S3_PREFIX" \
-              '. + [{"url": $url, "timestamp": $ts, "s3_prefix": $prefix, "files": ["output.pdf", "screenshot.png", "warc.tgz"]}]')
-          done
-
-          # Merge new entries into existing index (avoid duplicates by s3_prefix)
-          python3 -c "
+          # Build index from S3 state — group by snapshot (s3_prefix)
+          python3 - <<'PYEOF'
           import json
+          from collections import defaultdict
+
+          cve_id = "${{ inputs.cve_id }}"
           idx = json.load(open('/tmp/cve_index.json'))
-          new = json.loads('$NEW_ENTRIES')
-          existing_prefixes = {s['s3_prefix'] for s in idx.get('snapshots', [])}
-          for entry in new:
-              if entry['s3_prefix'] not in existing_prefixes:
-                  idx.setdefault('snapshots', []).append(entry)
+
+          # Group files by their snapshot prefix (everything except the filename)
+          snapshots = defaultdict(set)
+          with open('/tmp/s3_files.txt') as f:
+              for line in f:
+                  key = line.strip()
+                  if not key:
+                      continue
+                  parts = key.rsplit('/', 1)
+                  if len(parts) == 2:
+                      prefix, filename = parts
+                      snapshots[prefix].add(filename)
+
+          # Build snapshot entries
+          existing = {s['s3_prefix'] for s in idx.get('snapshots', [])}
+          for prefix, files in snapshots.items():
+              if prefix in existing:
+                  continue
+              parts = prefix.split('/')
+              timestamp = parts[-1]
+              url_parts = parts[1:-1]  # skip 'v2' and timestamp
+              domain = url_parts[0] if url_parts else ''
+              uri_path = '/'.join(url_parts[1:]) if len(url_parts) > 1 else ''
+
+              if '__q__' in uri_path:
+                  path_part, query_part = uri_path.rsplit('__q__', 1)
+                  original_url = f"https://{domain}/{path_part}?{query_part}"
+              else:
+                  original_url = f"https://{domain}/{uri_path}" if uri_path else f"https://{domain}"
+
+              idx.setdefault('snapshots', []).append({
+                  'url': original_url,
+                  'timestamp': timestamp,
+                  's3_prefix': prefix,
+                  'files': sorted(files)
+              })
+
           idx['snapshots'].sort(key=lambda x: x['timestamp'], reverse=True)
           idx['last_updated'] = '$(date -u +"%Y-%m-%dT%H:%M:%SZ")'
+          idx['total_snapshots'] = len(idx['snapshots'])
+
           json.dump(idx, open('/tmp/cve_index_updated.json', 'w'), indent=2)
-          print(f'{len(idx[\"snapshots\"])} total snapshots for {idx[\"cve_id\"]}')
-          "
+          print(f"{len(idx['snapshots'])} total snapshots for {cve_id}")
+          PYEOF
 
           aws s3 cp /tmp/cve_index_updated.json "s3://${S3_BUCKET}/${INDEX_KEY}" \
             --content-type application/json
