@@ -1,0 +1,197 @@
+name: Re-archive Scheduled References
+
+on:
+  schedule:
+    - cron: '15 * * * *'  # Every hour at :15
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run — show what would be re-archived'
+        required: false
+        default: 'false'
+        type: string
+      max_cves:
+        description: 'Max CVEs to process per run'
+        required: false
+        default: '10'
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cve-archiving
+  cancel-in-progress: false
+
+jobs:
+  check-schedule:
+    name: Check re-archive schedule
+    runs-on: ubuntu-latest
+    outputs:
+      cves_due: ${{ steps.check.outputs.cves_due }}
+      cve_list: ${{ steps.check.outputs.cve_list }}
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
+      S3_BUCKET: archiver-demo-v1-public
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check what needs re-archiving
+        id: check
+        run: |
+          set -euo pipefail
+
+          MAX_CVES="${{ inputs.max_cves || '10' }}"
+          DRY_RUN="${{ inputs.dry_run || 'false' }}"
+
+          # Download schedule state (or start fresh)
+          aws s3 cp "s3://${S3_BUCKET}/v2/schedule.json" /tmp/schedule.json 2>/dev/null \
+            || echo '{"entries":[]}' > /tmp/schedule.json
+
+          # Find CVEs that need re-archiving based on intervals: 3, 10, 30, 90 days
+          python3 - <<'PYEOF'
+          import json, os, sys
+          from datetime import datetime, timedelta, timezone
+
+          INTERVALS = [3, 10, 30, 90]
+          max_cves = int(os.environ.get('MAX_CVES', '10'))
+          dry_run = os.environ.get('DRY_RUN', 'false') == 'true'
+          now = datetime.now(timezone.utc)
+
+          schedule = json.load(open('/tmp/schedule.json'))
+          entries = schedule.get('entries', [])
+
+          due_cves = set()
+          due_details = []
+
+          for entry in entries:
+              cve_id = entry['cve_id']
+              first_archived = datetime.fromisoformat(entry['first_archived'].replace('Z', '+00:00'))
+              completed_intervals = entry.get('completed_intervals', [])
+
+              for interval in INTERVALS:
+                  if interval in completed_intervals:
+                      continue
+                  due_date = first_archived + timedelta(days=interval)
+                  if now >= due_date:
+                      due_cves.add(cve_id)
+                      due_details.append({
+                          'cve_id': cve_id,
+                          'interval': interval,
+                          'due_since': due_date.isoformat(),
+                      })
+                      break  # Only the next due interval per CVE
+
+          # Cap at max
+          due_list = sorted(due_cves)[:max_cves]
+          due_count = len(due_list)
+
+          print(f"Due: {due_count} CVEs (of {len(due_cves)} total due)", file=sys.stderr)
+
+          # Write outputs
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f"cves_due={due_count}\n")
+              cve_json = json.dumps(due_list)
+              f.write(f"cve_list={cve_json}\n")
+
+          # Summary
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+              f.write("### Re-archive Schedule Check\n\n")
+              f.write(f"| Metric | Value |\n|--------|-------|\n")
+              f.write(f"| Total entries tracked | {len(entries)} |\n")
+              f.write(f"| CVEs due for re-archive | {len(due_cves)} |\n")
+              f.write(f"| CVEs to process this run | {due_count} |\n")
+              f.write(f"| Dry run | {dry_run} |\n\n")
+              if due_details[:20]:
+                  f.write("**Due:**\n")
+                  for d in sorted(due_details, key=lambda x: x['due_since'])[:20]:
+                      f.write(f"- {d['cve_id']} (interval: {d['interval']}d, due since: {d['due_since'][:10]})\n")
+          PYEOF
+        env:
+          MAX_CVES: ${{ inputs.max_cves || '10' }}
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+
+  rearchive:
+    name: Re-archive ${{ matrix.cve_id }}
+    needs: check-schedule
+    if: needs.check-schedule.outputs.cves_due != '0' && inputs.dry_run != 'true'
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        cve_id: ${{ fromJSON(needs.check-schedule.outputs.cve_list) }}
+    uses: ./.github/workflows/archive-cve.yml
+    with:
+      cve_id: ${{ matrix.cve_id }}
+    secrets: inherit
+
+  update-schedule:
+    name: Update schedule after re-archiving
+    needs: [check-schedule, rearchive]
+    if: always() && needs.check-schedule.outputs.cves_due != '0' && inputs.dry_run != 'true'
+    runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
+      S3_BUCKET: archiver-demo-v1-public
+    steps:
+      - name: Mark completed intervals
+        run: |
+          set -euo pipefail
+
+          CVE_LIST='${{ needs.check-schedule.outputs.cve_list }}'
+
+          aws s3 cp "s3://${S3_BUCKET}/v2/schedule.json" /tmp/schedule.json 2>/dev/null \
+            || echo '{"entries":[]}' > /tmp/schedule.json
+
+          python3 - <<'PYEOF'
+          import json, os
+          from datetime import datetime, timedelta, timezone
+
+          INTERVALS = [3, 10, 30, 90]
+          now = datetime.now(timezone.utc)
+          cve_list = json.loads(os.environ.get('CVE_LIST', '[]'))
+
+          schedule = json.load(open('/tmp/schedule.json'))
+          entries_by_cve = {e['cve_id']: e for e in schedule.get('entries', [])}
+
+          for cve_id in cve_list:
+              entry = entries_by_cve.get(cve_id)
+              if not entry:
+                  continue
+              first_archived = datetime.fromisoformat(entry['first_archived'].replace('Z', '+00:00'))
+              completed = set(entry.get('completed_intervals', []))
+
+              for interval in INTERVALS:
+                  if interval in completed:
+                      continue
+                  due_date = first_archived + timedelta(days=interval)
+                  if now >= due_date:
+                      completed.add(interval)
+                      break  # Only mark the one we just processed
+
+              entry['completed_intervals'] = sorted(completed)
+              entry['last_rearchived'] = now.strftime('%Y%m%d-%H%M%S')
+              entries_by_cve[cve_id] = entry
+
+          schedule['entries'] = sorted(entries_by_cve.values(), key=lambda e: e['cve_id'])
+          schedule['last_updated'] = now.strftime('%Y%m%d-%H%M%S')
+
+          json.dump(schedule, open('/tmp/schedule_updated.json', 'w'), indent=2)
+
+          # Count stats
+          total = len(schedule['entries'])
+          fully_done = sum(1 for e in schedule['entries'] if set(INTERVALS).issubset(set(e.get('completed_intervals', []))))
+          print(f"Schedule: {total} entries, {fully_done} fully completed")
+          PYEOF
+
+          aws s3 cp /tmp/schedule_updated.json "s3://${S3_BUCKET}/v2/schedule.json" \
+            --content-type application/json
+        env:
+          CVE_LIST: ${{ needs.check-schedule.outputs.cve_list }}

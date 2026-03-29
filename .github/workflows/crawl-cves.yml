@@ -24,6 +24,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: cve-archiving
+  cancel-in-progress: false
+
 jobs:
   crawl:
     name: Crawl cvelistV5 commits
@@ -336,3 +340,48 @@ jobs:
             echo ""
             echo "$(python3 -c "import json; d=json.load(open('/tmp/index_new.json')); print(f'**{d[\"total_urls\"]}** URLs, **{d[\"total_snapshots\"]}** snapshots')")"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Register CVEs in re-archive schedule
+        run: |
+          set -euo pipefail
+
+          CVE_LIST='${{ needs.crawl.outputs.cve_list }}'
+
+          # Download existing schedule
+          aws s3 cp "s3://${S3_BUCKET}/v2/schedule.json" /tmp/schedule.json 2>/dev/null \
+            || echo '{"entries":[]}' > /tmp/schedule.json
+
+          # Add new CVEs to schedule (skip if already tracked)
+          python3 - <<'PYEOF'
+          import json, os
+          from datetime import datetime, timezone
+
+          now = datetime.now(timezone.utc)
+          cve_list = json.loads(os.environ.get('CVE_LIST', '[]'))
+          schedule = json.load(open('/tmp/schedule.json'))
+
+          existing = {e['cve_id'] for e in schedule.get('entries', [])}
+          added = 0
+
+          for cve_id in cve_list:
+              if cve_id in existing:
+                  continue
+              schedule.setdefault('entries', []).append({
+                  'cve_id': cve_id,
+                  'first_archived': now.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                  'completed_intervals': [0],  # 0 = initial archival
+                  'last_rearchived': now.strftime('%Y%m%d-%H%M%S'),
+              })
+              added += 1
+
+          schedule['entries'].sort(key=lambda e: e['cve_id'])
+          schedule['last_updated'] = now.strftime('%Y%m%d-%H%M%S')
+
+          json.dump(schedule, open('/tmp/schedule_updated.json', 'w'), indent=2)
+          print(f"Schedule: added {added} new CVEs ({len(schedule['entries'])} total)")
+          PYEOF
+
+          aws s3 cp /tmp/schedule_updated.json "s3://${S3_BUCKET}/v2/schedule.json" \
+            --content-type application/json
+        env:
+          CVE_LIST: ${{ needs.crawl.outputs.cve_list }}
